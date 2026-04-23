@@ -21,6 +21,10 @@ import os
 import tempfile
 import uuid
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,10 +38,10 @@ from file_scanner import _detect_header_row, build_report_text, scan_file
 from tool_registry import build_system_prompt
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-OLLAMA_BASE_URL = "http://192.168.0.80:11434"
-MODEL_NAME      = "gemma3:12b"
-INDEX_DIR       = "embeddings/rules_index_1"
-EMBED_MODEL     = "sentence-transformers/all-MiniLM-L6-v2"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+MODEL_NAME      = os.getenv("MODEL_NAME", "gemma3:12b")
+INDEX_DIR       = os.getenv("INDEX_DIR", "embeddings/rules_index_1")
+EMBED_MODEL     = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
 # ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Wind File Validator API")

@@ -1,0 +1,12 @@
+python-dotenv
+fastapi
+uvicorn[standard]
+pandas
+langchain
+langchain-community
+langchain-core
+langchain-ollama
+sentence-transformers
+faiss-cpu
+python-multipart
+pydantic
