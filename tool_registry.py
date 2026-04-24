@@ -12,6 +12,8 @@ HOW TO ADD A NEW TOOL
 That's it — the system prompt is rebuilt automatically from this registry.
 """
 
+import logging
+
 # ── Tool instructions ──────────────────────────────────────────────────────────
 # Each key is the exact function name used in the @tool decorator.
 # The agent reads these instructions to decide which tool to call and how.
@@ -275,8 +277,13 @@ def build_system_prompt(tool_names: list[str]) -> str:
     Only tools present in TOOL_INSTRUCTIONS are included.
     Unrecognised tool names are silently skipped.
     """
+    if not tool_names:
+        logging.getLogger(__name__).warning("build_system_prompt called with empty tool list")
+
     sections = []
     for name in tool_names:
+        if not isinstance(name, str):
+            continue
         instructions = TOOL_INSTRUCTIONS.get(name)
         if instructions:
             sections.append(f"### {name}\n{instructions.strip()}")

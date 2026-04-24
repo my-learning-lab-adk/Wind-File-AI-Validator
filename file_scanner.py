@@ -8,10 +8,14 @@ Scans a wind-data TSV file for:
 No LLM involved — pure pandas. Exact, full-coverage sweep.
 """
 
+import logging
+import os
 import re
 import unicodedata
 import pandas as pd
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 # ---------- helpers ----------
@@ -37,13 +41,18 @@ def normalize_column(name: str) -> str:
 
 def _detect_header_row(path: str, encoding: str = "ISO-8859-1", max_scan: int = 60) -> int:
     """Find the line index (0-based) that starts with Date/Time or Timestamp."""
-    with open(path, "r", encoding=encoding, errors="replace") as f:
-        for i, line in enumerate(f):
-            if i > max_scan:
-                break
-            low = line.strip().lower()
-            if low.startswith("date/time") or low.startswith("timestamp") or low.startswith("date\ttime"):
-                return i
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"File not found: {path}")
+    try:
+        with open(path, "r", encoding=encoding, errors="replace") as f:
+            for i, line in enumerate(f):
+                if i > max_scan:
+                    break
+                low = line.strip().lower()
+                if low.startswith("date/time") or low.startswith("timestamp") or low.startswith("date\ttime"):
+                    return i
+    except OSError as exc:
+        raise ValueError(f"Cannot read file: {exc}") from exc
     raise ValueError("Could not find a Date/Time or Timestamp header row in the first 60 lines.")
 
 
@@ -88,20 +97,33 @@ def scan_file(path: str, encoding: str = "ISO-8859-1") -> dict:
       timestamp_column  -> name of timestamp col (best guess)
       sample_rows       -> first 5 rows as list of dicts
     """
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"File not found: {path}")
+    if os.path.getsize(path) == 0:
+        raise ValueError("The uploaded file is empty.")
+
     header_row = _detect_header_row(path, encoding=encoding)
     metadata = _read_metadata(path, header_row, encoding=encoding)
 
-    df = pd.read_csv(
-        path,
-        sep="\t",
-        skiprows=header_row,
-        encoding=encoding,
-        engine="python",
-        on_bad_lines="skip",
-    )
+    try:
+        df = pd.read_csv(
+            path,
+            sep="\t",
+            skiprows=header_row,
+            encoding=encoding,
+            engine="python",
+            on_bad_lines="skip",
+        )
+    except Exception as exc:
+        raise ValueError(f"Failed to parse the file as TSV: {exc}") from exc
 
     # drop fully-empty junk columns like "Unnamed: 15" that are entirely NaN
     df = df.dropna(axis=1, how="all")
+
+    if df.empty:
+        raise ValueError("The file contains no data rows after parsing.")
+    if df.shape[1] == 0:
+        raise ValueError("The file contains no valid columns after removing empty ones.")
 
     columns_info = [
         {"original": str(c), "normalized": normalize_column(c)} for c in df.columns
@@ -271,7 +293,14 @@ def build_report_text(scan: dict, max_rows_shown: int = 10) -> str:
 
 
 if __name__ == "__main__":
-    import sys, json
+    import sys
+    if len(sys.argv) < 2:
+        print("Usage: python file_scanner.py <path_to_file>", file=sys.stderr)
+        sys.exit(1)
     path = sys.argv[1]
-    scan = scan_file(path)
-    print(build_report_text(scan))
+    try:
+        scan = scan_file(path)
+        print(build_report_text(scan))
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
