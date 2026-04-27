@@ -262,7 +262,7 @@ APPLIES_TO: column
 
 
 KEYWORDS:
-timestamp column first column Date Time Timestamp required
+timestamp column first column Date/Time Timestamp required
 
 
 DESCRIPTION:
@@ -295,6 +295,7 @@ column naming format sensor height type unit pattern underscore
 
 DESCRIPTION:
 Column names must follow the format:
+Date/Time or Timestamp or
 <sensortype>_<height>_<type> [unit]
 or
 <sensortype>_<height>_<direction>_<type> [unit]
@@ -303,12 +304,15 @@ or
 VALID:
 WS_10_mean [m/s]
 WD_20_N_mean [°]
-
+Date/Time
+Timestamp
 
 INVALID:
 WS10mean
 WS-10-mean
 WS__10_mean
+date-time
+date.time
 
 
 REASON:
