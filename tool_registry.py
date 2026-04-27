@@ -25,6 +25,8 @@ PURPOSE: answers COUNT / NUMBER questions about the file.
 Returns: total rows, total columns, timestamp column name,
          number of columns that have NaN (+ total NaN cells),
          number of columns that have 9999 (+ total 9999 cells),
+         number of columns with special characters (+ total special char cells),
+         number of duplicate rows,
          number of fully-missing columns, number of clean columns.
 
 CALL THIS TOOL when the user asks:
@@ -121,10 +123,41 @@ DO NOT call this tool when the user asks:
 
 The query argument is ignored — pass any string.""",
 
+    "get_special_char_details": """\
+PURPOSE: lists WHICH specific columns have special characters and HOW MANY cells each has.
+Returns: for each affected column → "column_name : count"
+Only columns that actually have special characters appear in the list.
+Special characters = anything except letters, digits, whitespace, and dot (.).
+The timestamp column is excluded from this check.
+
+CALL THIS TOOL when the user asks:
+  "which columns have special characters?"  /  "show special char count per column"
+  "are there any invalid characters in the data?"
+  "list columns with special characters"
+
+DO NOT call this tool when the user asks:
+  • HOW MANY columns (a number) have special chars → use get_file_summary
+  • NaN or 9999 details → use get_nan_details / get_9999_details
+
+The query argument is ignored — pass any string.""",
+
+    "get_duplicate_row_details": """\
+PURPOSE: lists which rows are duplicates based on the timestamp column.
+A row is a duplicate if its timestamp value already appeared in an earlier row.
+The first occurrence is kept as valid; subsequent rows with the same timestamp are flagged.
+
+CALL THIS TOOL when the user asks:
+  "are there duplicate rows?"  /  "which rows are duplicated?"
+  "show me duplicate timestamps"  /  "how many duplicate rows?"
+
+DO NOT call this tool when the user asks about NaN, 9999, or column names.
+
+The query argument is ignored — pass any string.""",
+
     "get_column_status": """\
-PURPOSE: shows EVERY column in one combined table with its NaN count AND 9999 count.
-Returns: a table — column_name | NaN count | 9999 count — for ALL columns
-(columns with no issues show 0 for both counts).
+PURPOSE: shows EVERY column in one combined table with its NaN count, 9999 count, and special character count.
+Returns: a table — column_name | NaN count | 9999 count | Special chars — for ALL columns
+(columns with no issues show 0 for all counts).
 
 CALL THIS TOOL when the user asks:
   "show NaN and 9999 for all columns"  /  "full data quality table"
@@ -134,6 +167,7 @@ CALL THIS TOOL when the user asks:
 DO NOT call this tool when the user wants:
   • ONLY NaN (not 9999) → use get_nan_details
   • ONLY 9999 (not NaN) → use get_9999_details
+  • ONLY special chars → use get_special_char_details
   • just the total counts (numbers) → use get_file_summary
 
 The query argument is ignored — pass any string.""",
@@ -216,6 +250,8 @@ TOOL QUICK-PICK GUIDE — read this first, pick exactly ONE tool:
   "which columns are fully empty?"              → get_fully_missing_columns
   "which columns have NaN? (names + counts)"    → get_nan_details
   "which columns have 9999? (names + counts)"   → get_9999_details
+  "which columns have special characters?"      → get_special_char_details
+  "are there duplicate rows?"                   → get_duplicate_row_details
   "NaN AND 9999 counts for every column?"       → get_column_status
   "are column names valid / correct?"           → check_column_names
   "which columns go out of rule / are invalid?" → check_column_names

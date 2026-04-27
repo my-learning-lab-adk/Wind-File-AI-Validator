@@ -303,12 +303,16 @@ def _make_tools(session: dict):
         rows, cols = scan["shape"]
         na_cols    = len(scan["na_cells"])
         s9_cols    = len(scan["sentinel_9999"])
+        sc_cols    = len(scan.get("special_char_cells", []))
         total_nan  = sum(i["count"] for i in scan["na_cells"])
         total_999  = sum(i["count"] for i in scan["sentinel_9999"])
+        total_sc   = sum(i["count"] for i in scan.get("special_char_cells", []))
+        dup_count  = scan.get("duplicate_row_count", 0)
         fully      = len(scan["all_missing_cols"])
         clean      = cols - len(
             {i["column"] for i in scan["na_cells"]} |
-            {i["column"] for i in scan["sentinel_9999"]}
+            {i["column"] for i in scan["sentinel_9999"]} |
+            {i["column"] for i in scan.get("special_char_cells", [])}
         )
         return (
             f"Total rows             : {rows:,}\n"
@@ -316,8 +320,10 @@ def _make_tools(session: dict):
             f"Timestamp column       : {scan['timestamp_column']}\n"
             f"Columns with NaN/blank : {na_cols}  (total NaN cells: {total_nan:,})\n"
             f"Columns with 9999      : {s9_cols}  (total 9999 cells: {total_999:,})\n"
+            f"Columns with special ch: {sc_cols}  (total special char cells: {total_sc:,})\n"
+            f"Duplicate rows         : {dup_count}\n"
             f"Fully-missing columns  : {fully}\n"
-            f"Clean columns          : {clean}  (no NaN, no 9999)"
+            f"Clean columns          : {clean}  (no NaN, no 9999, no special chars)"
         )
 
     def get_file_metadata(_: str) -> str:
@@ -362,14 +368,36 @@ def _make_tools(session: dict):
             lines.append(f"  {item['column']} : {item['count']:,}")
         return "\n".join(lines)
 
+    def get_special_char_details(_: str) -> str:
+        items = scan.get("special_char_cells", [])
+        if not items:
+            return "No special character values found in the file."
+        lines = [f"Columns with special characters ({len(items)} columns):"]
+        for item in items:
+            lines.append(f"  {item['column']} : {item['count']:,}")
+        return "\n".join(lines)
+
+    def get_duplicate_row_details(_: str) -> str:
+        dup_rows = scan.get("duplicate_rows", [])
+        dup_count = scan.get("duplicate_row_count", 0)
+        if not dup_rows:
+            return "No duplicate rows found (based on timestamp column)."
+        shown = dup_rows[:20]
+        extra = f" … (+{dup_count - 20} more)" if dup_count > 20 else ""
+        return (
+            f"Duplicate rows (based on timestamp): {dup_count}\n"
+            f"Row indices: {shown}{extra}"
+        )
+
     def get_column_status(_: str) -> str:
         na_map = {i["column"]: i["count"] for i in scan["na_cells"]}
         s9_map = {i["column"]: i["count"] for i in scan["sentinel_9999"]}
-        lines  = ["Column name                              NaN count   9999 count"]
-        lines.append("-" * 65)
+        sc_map = {i["column"]: i["count"] for i in scan.get("special_char_cells", [])}
+        lines  = ["Column name                              NaN count   9999 count   Special chars"]
+        lines.append("-" * 80)
         for c in scan["columns"]:
             col = c["original"]
-            lines.append(f"  {col:<40}{na_map.get(col, 0):<12}{s9_map.get(col, 0)}")
+            lines.append(f"  {col:<40}{na_map.get(col, 0):<12}{s9_map.get(col, 0):<14}{sc_map.get(col, 0)}")
         return "\n".join(lines)
 
     def retrieve_validation_rules(query: str) -> str:
@@ -404,6 +432,8 @@ def _make_tools(session: dict):
         "get_fully_missing_columns": get_fully_missing_columns,
         "get_nan_details":           get_nan_details,
         "get_9999_details":          get_9999_details,
+        "get_special_char_details":  get_special_char_details,
+        "get_duplicate_row_details": get_duplicate_row_details,
         "get_column_status":         get_column_status,
         "retrieve_validation_rules": retrieve_validation_rules,
         "check_column_names":        check_column_names,
@@ -419,6 +449,8 @@ REACT_SYSTEM = build_system_prompt([
     "get_fully_missing_columns",
     "get_nan_details",
     "get_9999_details",
+    "get_special_char_details",
+    "get_duplicate_row_details",
     "get_column_status",
     "retrieve_validation_rules",
     "check_column_names",
@@ -575,10 +607,13 @@ async def analyse_file(file: UploadFile = File(...)):
             "columns": scan["shape"][1],
         },
         "summary": {
-            "nan_cols":          len(scan["na_cells"]),
-            "sentinel_cols":     len(scan["sentinel_9999"]),
-            "fully_missing_cols": len(scan["all_missing_cols"]),
+            "nan_cols":            len(scan["na_cells"]),
+            "sentinel_cols":       len(scan["sentinel_9999"]),
+            "special_char_cols":   len(scan.get("special_char_cells", [])),
+            "duplicate_rows":      scan.get("duplicate_row_count", 0),
+            "fully_missing_cols":  len(scan["all_missing_cols"]),
         },
+        "validation_messages":    scan.get("validation_messages", {}),
     }
 
 
