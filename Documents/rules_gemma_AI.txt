@@ -1,0 +1,1142 @@
+﻿RULE_ID: FS_001
+CATEGORY: file_structure
+APPLIES_TO: file
+
+
+KEYWORDS:
+file empty validation structure data presence
+
+
+DESCRIPTION:
+The file must not be empty and should contain metadata and data rows.
+
+
+VALID:
+The file contains metadata lines and tabular data.
+
+
+INVALID:
+The file is completely empty with no content.
+
+
+REASON:
+An empty file cannot be processed or validated.
+
+
+RULE_ID: FS_002
+CATEGORY: file_structure
+APPLIES_TO: file
+
+
+KEYWORDS:
+file delimiter tab separated TSV format columns
+
+
+DESCRIPTION:
+The file must be tab-separated (TSV format), where columns are separated by tab characters.
+
+
+VALID:
+col1\tcol2\tcol3
+
+
+INVALID:
+col1,col2,col3
+
+
+REASON:
+Incorrect delimiter prevents correct parsing of columns.
+
+
+RULE_ID: FS_003
+CATEGORY: file_structure
+APPLIES_TO: file
+
+
+KEYWORDS:
+metadata header position before data structure order
+
+
+DESCRIPTION:
+Metadata must appear at the beginning of the file before column headers and data rows.
+
+
+VALID:
+Metadata lines → column headers → data rows
+
+
+INVALID:
+Data rows appear before metadata.
+
+
+REASON:
+Incorrect file structure causes parsing and interpretation errors.
+
+
+
+
+RULE_ID: MD_001
+CATEGORY: metadata
+APPLIES_TO: metadata
+
+
+KEYWORDS:
+metadata required latitude longitude elevation header
+
+
+DESCRIPTION:
+The metadata section must contain latitude, longitude, and elevation values.
+
+
+VALID:
+Latitude: 13.2 N
+Longitude: 77.5 E
+Elevation: 900 m
+
+
+INVALID:
+Latitude and longitude present but elevation missing.
+
+
+REASON:
+Missing required metadata fields prevents proper identification of location.
+
+
+RULE_ID: MD_002
+CATEGORY: metadata
+APPLIES_TO: latitude
+
+
+KEYWORDS:
+latitude range -90 90 coordinate valid limit
+
+
+DESCRIPTION:
+Latitude must be within the range -90 to 90.
+
+
+VALID:
+Latitude: 13.2
+
+
+INVALID:
+Latitude: 120
+
+
+REASON:
+Latitude outside the valid range is not geographically possible.
+
+
+RULE_ID: MD_003
+CATEGORY: metadata
+APPLIES_TO: longitude
+
+
+KEYWORDS:
+longitude range -180 180 coordinate valid limit
+
+
+DESCRIPTION:
+Longitude must be within the range -180 to 180.
+
+
+VALID:
+Longitude: 77.5
+
+
+INVALID:
+Longitude: 250
+
+
+REASON:
+Longitude outside the valid range is not geographically valid.
+
+
+RULE_ID: MD_004
+CATEGORY: metadata
+APPLIES_TO: latitude longitude
+
+
+KEYWORDS:
+coordinate format DD DDM DMS decimal degrees
+
+
+DESCRIPTION:
+Coordinates must be provided in one of the supported formats: DD (decimal degrees), DDM, or DMS.
+
+
+VALID:
+13.2
+13°12'
+13°12'30"
+
+
+INVALID:
+Latitude: approx thirteen degrees
+
+
+REASON:
+Unsupported coordinate format cannot be interpreted correctly.
+
+
+RULE_ID: MD_005
+CATEGORY: metadata
+APPLIES_TO: latitude longitude
+
+
+KEYWORDS:
+direction N S E W coordinate direction hemisphere
+
+
+DESCRIPTION:
+Latitude must include N or S direction, and longitude must include E or W direction.
+
+
+VALID:
+Latitude: 13.2 N
+Longitude: 77.5 E
+
+
+INVALID:
+Latitude: 13.2
+Longitude: 77.5
+
+
+REASON:
+Missing direction makes coordinate interpretation ambiguous.
+
+
+RULE_ID: MD_006
+CATEGORY: metadata
+APPLIES_TO: elevation
+
+
+KEYWORDS:
+elevation format meters m unit height
+
+
+DESCRIPTION:
+Elevation must be specified in meters using the format '<value> m'.
+
+
+VALID:
+Elevation: 900 m
+
+
+INVALID:
+Elevation: 900
+
+
+REASON:
+Missing unit makes elevation value unclear.
+
+
+RULE_ID: MD_007
+CATEGORY: metadata
+APPLIES_TO: file
+
+
+KEYWORDS:
+metadata position header before data order
+
+
+DESCRIPTION:
+Metadata must appear at the beginning of the file before column headers and data rows.
+
+
+VALID:
+Metadata lines appear before column names and data.
+
+
+INVALID:
+Metadata appears after tabular data.
+
+
+REASON:
+Incorrect metadata position leads to parsing errors.
+
+
+RULE_ID: CN_001
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+timestamp column first column Date/Time Timestamp required
+
+
+DESCRIPTION:
+The first column must be a timestamp column named either "Date/Time" or "Timestamp". Only one such column should exist.
+
+
+VALID:
+Date/Time
+Timestamp
+
+
+INVALID:
+time
+datetime_value
+multiple timestamp columns
+
+
+REASON:
+Missing or incorrect timestamp column prevents proper time-based analysis.
+
+
+RULE_ID: CN_002
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+column naming format sensor height type unit pattern underscore
+
+
+DESCRIPTION:
+Column names must follow the format:
+Date/Time or Timestamp or
+<sensortype>_<height>_<type> [unit]
+or
+<sensortype>_<height>_<direction>_<type> [unit]
+
+
+VALID:
+WS_10_mean [m/s]
+WD_20_N_mean [°]
+Date/Time
+Timestamp
+
+INVALID:
+WS10mean
+WS-10-mean
+WS__10_mean
+date-time
+date.time
+
+
+REASON:
+Incorrect column format prevents consistent interpretation of sensor data.
+
+
+RULE_ID: CN_003
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+height range 1 400 meters decimal sensor height
+
+
+DESCRIPTION:
+The height value in the column name must be between 1 and 400 meters. Decimal values are allowed.
+
+
+VALID:
+WS_10_mean [m/s]
+WS_10.5_mean [m/s]
+
+
+INVALID:
+WS_0_mean [m/s]
+WS_500_mean [m/s]
+
+
+REASON:
+Height outside the valid range is not supported for sensor measurements.
+
+
+RULE_ID: CN_004
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+sensor type case insensitive WS WD T RH P
+
+
+DESCRIPTION:
+Sensor type in column names is not case sensitive.
+
+
+VALID:
+ws_10_mean [m/s]
+WS_10_mean [m/s]
+
+
+INVALID:
+(No invalid case — both upper and lower case are acceptable)
+
+
+REASON:
+Sensor type case should not affect interpretation.
+
+
+RULE_ID: CN_004A
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+sensor type allowed WS WD T VWS RH P valid sensor types
+
+
+DESCRIPTION:
+Column names must use only predefined valid sensor types. The allowed sensor types are:
+WS (Wind Speed), WD (Wind Direction), T (Temperature), VWS (Vertical Wind Speed), RH (Humidity), and P (Pressure).
+
+
+VALID:
+WS_10_mean [m/s]
+WD_20_mean [°]
+T_10_mean [°C]
+
+
+INVALID:
+ABC_10_mean [m/s]
+TEMP_10_mean [°C]
+XYZ_20_mean [m/s]
+
+
+REASON:
+Unknown sensor types are not supported and cannot be interpreted correctly.
+
+
+
+
+RULE_ID: CN_005
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+direction N E S W NE NW SE SW WSW ESE NNE SSE SSW NNW WNW ENE
+
+
+DESCRIPTION:
+If direction is included in the column name, it must be one of the valid compass directions. (N E S W NE NW SE SW WSW ESE NNE SSE SSW NNW WNW ENE)
+
+
+VALID:
+WD_20_N_mean [°]
+WD_30_SW_mean [°]
+
+
+INVALID:
+WD_20_X_mean [°]
+WD_20_NORTH_mean [°]
+
+
+REASON:
+Invalid direction values cannot be interpreted correctly.
+
+
+RULE_ID: CN_006
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+type mean SD standard deviation sensor type
+
+
+DESCRIPTION:
+The type field in the column name must be either "mean" or "SD".
+
+
+VALID:
+WS_10_mean [m/s]
+WS_10_SD [m/s]
+
+
+INVALID:
+WS_10_avg [m/s]
+WS_10_value [m/s]
+
+
+REASON:
+Unsupported type values lead to inconsistent data interpretation.
+
+
+RULE_ID: CN_007
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+units square brackets sensor units format required
+
+
+DESCRIPTION:
+Each column name must include units enclosed in square brackets.
+
+
+VALID:
+WS_10_mean [m/s]
+
+
+INVALID:
+WS_10_mean m/s
+WS_10_mean
+
+
+REASON:
+Missing units makes the measurement unclear.
+
+
+RULE_ID: CN_008
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+unit rules WS WD T VWS RH P correct units mapping
+
+
+DESCRIPTION:
+Each sensor type must have the correct corresponding unit.
+
+
+VALID:
+WS - [m/s]
+WD - [°]
+T - [°C]
+RH - [%]
+P - [mbar]
+
+
+INVALID:
+WS_10_mean [°]
+T_10_mean [m/s]
+
+
+REASON:
+Incorrect unit assignment leads to invalid sensor interpretation.
+
+
+RULE_ID: CN_009
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+allowed characters letters numbers underscores no special characters
+
+
+DESCRIPTION:
+Column names must contain only letters, numbers, and underscores.
+
+
+VALID:
+WS_10_mean
+
+
+INVALID:
+WS@10_mean
+WS-10-mean
+
+
+REASON:
+Special characters break naming consistency and parsing.
+
+
+RULE_ID: CN_010
+CATEGORY: column_name
+APPLIES_TO: column
+
+
+KEYWORDS:
+underscore multiple consecutive invalid format
+
+
+DESCRIPTION:
+Column names must not contain multiple consecutive underscores.
+
+
+VALID:
+WS_10_mean
+
+
+INVALID:
+WS__10_mean
+
+
+REASON:
+Multiple underscores indicate incorrect formatting.
+
+
+RULE_ID: CN_011
+CATEGORY: column_name
+APPLIES_TO: dataset
+
+
+KEYWORDS:
+duplicate column names unique constraint dataset
+
+
+DESCRIPTION:
+Each column name must be unique within the dataset.
+
+
+VALID:
+All column names are distinct.
+
+
+INVALID:
+Two or more columns have the same name.
+
+
+REASON:
+Duplicate column names create ambiguity in data processing.
+
+
+RULE_ID: RC_001
+CATEGORY: required_columns
+APPLIES_TO: dataset
+
+
+KEYWORDS:
+wind speed WS column required presence dataset mandatory
+
+
+DESCRIPTION:
+The dataset must contain at least one wind speed (WS) column.
+
+
+VALID:
+Dataset contains one or more columns starting with WS (e.g., WS_10_mean [m/s]).
+
+
+INVALID:
+No column with sensor type WS is present.
+
+
+REASON:
+Wind speed data is mandatory for wind analysis and cannot be missing.
+
+
+RULE_ID: RC_002
+CATEGORY: required_columns
+APPLIES_TO: dataset
+
+
+KEYWORDS:
+wind direction WD column required presence dataset mandatory
+
+
+DESCRIPTION:
+The dataset must contain at least one wind direction (WD) column.
+
+
+VALID:
+Dataset contains one or more columns starting with WD (e.g., WD_10_mean [°]).
+
+
+INVALID:
+No column with sensor type WD is present.
+
+
+REASON:
+Wind direction data is essential for interpreting wind patterns.
+
+
+RULE_ID: RC_003
+CATEGORY: required_columns
+APPLIES_TO: column
+
+
+KEYWORDS:
+column data presence not empty no values all missing
+
+
+DESCRIPTION:
+Each column must contain at least some valid data and must not be completely empty.
+
+
+VALID:
+Column contains at least one valid numeric value.
+
+
+INVALID:
+Column contains only missing values such as NA, blank, or 9999.
+
+
+REASON:
+A column with no valid data is not useful for analysis.
+
+
+
+
+RULE_ID: TS_001
+CATEGORY: timestamp
+APPLIES_TO: dataset
+
+
+KEYWORDS:
+timestamp column required Date Time Timestamp presence
+
+
+DESCRIPTION:
+The dataset must contain exactly one timestamp column named either "Date/Time" or "Timestamp".
+
+
+VALID:
+Dataset contains exactly one column named Date/Time or Timestamp.
+
+
+INVALID:
+No timestamp column present.
+More than one timestamp column present.
+
+
+REASON:
+A valid dataset must have exactly one timestamp column for time-based analysis.
+
+
+RULE_ID: TS_002
+CATEGORY: timestamp
+APPLIES_TO: column
+
+
+KEYWORDS:
+timestamp format YYYY MM DD HH MM SS supported formats datetime
+
+
+DESCRIPTION:
+Timestamp values must follow one of the supported date-time formats.
+
+
+VALID:
+2023-05-15 10:30:00
+15-05-2023 10:30:00
+2023/05/15 10:30
+
+
+INVALID:
+2023.05.15 10:30
+15-13-2023 10:30
+
+
+REASON:
+Unsupported timestamp formats cannot be parsed correctly.
+
+
+RULE_ID: TS_003
+CATEGORY: timestamp
+APPLIES_TO: column
+
+
+KEYWORDS:
+timestamp range year month day hour minute second valid limits
+
+
+DESCRIPTION:
+Each component of the timestamp must fall within valid ranges based on the format:
+YYYY-MM-DD HH:MM:SS
+
+
+YYYY (Year): valid calendar year
+MM (Month): 1–12
+DD (Day): 1–31
+HH (Hour): 0–24
+MM (Minute): 0–59
+SS (Second): 0–59 
+
+
+VALID:
+2023-05-15 10:30:00
+
+
+INVALID:
+2023-13-10 10:30:00
+2023-05-32 10:30:00
+2023-05-15 25:00:00
+
+
+REASON:
+Out-of-range timestamp values are not valid calendar times.
+
+
+RULE_ID: TS_004
+CATEGORY: timestamp
+APPLIES_TO: column
+
+
+KEYWORDS:
+timestamp missing null blank NA values
+
+
+DESCRIPTION:
+Timestamp column must not contain missing values such as NA, blank, or null.
+
+
+VALID:
+All rows have valid timestamp values.
+
+
+INVALID:
+Some rows have missing timestamp values.
+
+
+REASON:
+Missing timestamps break time continuity and analysis.
+
+
+RULE_ID: TS_005
+CATEGORY: timestamp
+APPLIES_TO: column
+
+
+KEYWORDS:
+timestamp duplicate unique time index
+
+
+DESCRIPTION:
+Timestamp values must be unique and should not repeat.
+
+
+VALID:
+All timestamps are unique.
+
+
+INVALID:
+Duplicate timestamps exist in the dataset.
+
+
+REASON:
+Duplicate timestamps cause ambiguity in time-series data.
+
+
+
+
+RULE_ID: DV_001
+CATEGORY: data_value
+APPLIES_TO: cell
+
+
+KEYWORDS:
+missing values NA blank 9999 -9999 null allowed values
+
+
+DESCRIPTION:
+Missing values are allowed and may be represented as NA, blank, 9999, or -9999.
+
+
+VALID:
+NA
+(blank cell)
+9999
+-9999
+
+
+INVALID:
+N/A
+missing
+NULL (if not specified)
+
+
+REASON:
+Only predefined missing value representations are allowed for consistency.
+
+
+RULE_ID: DV_002
+CATEGORY: data_value
+APPLIES_TO: cell
+
+
+KEYWORDS:
+9999 missing value sentinel placeholder invalid reading
+
+
+DESCRIPTION:
+The value 9999/-9999 must be treated as a missing or invalid data point.
+
+
+VALID:
+9999 interpreted as missing
+
+
+INVALID:
+Treating 9999 as a valid measurement
+
+
+REASON:
+9999 is a sentinel value indicating no valid sensor reading.
+
+
+RULE_ID: DV_003
+CATEGORY: data_value
+APPLIES_TO: column
+
+
+KEYWORDS:
+column all missing NA 9999 blank no valid data
+
+
+DESCRIPTION:
+A column must not contain only missing values such as NA, blank, 9999, or -9999.
+
+
+VALID:
+Column has at least one valid numeric value.
+
+
+INVALID:
+All values in the column are NA, blank, or 9999.
+
+
+REASON:
+A column with no valid data is not useful for analysis.
+
+
+RULE_ID: DV_004
+CATEGORY: data_value
+APPLIES_TO: cell
+
+
+KEYWORDS:
+numeric values only numbers no text sensor data numeric
+
+
+DESCRIPTION:
+Data values must be numeric except for allowed missing values.
+
+
+VALID:
+12.5
+0
+-3.2
+
+
+INVALID:
+abc
+12km
+Ten
+1@3.5
+
+
+REASON:
+Non-numeric values cannot be used in numerical analysis.
+
+
+RULE_ID: DV_005
+CATEGORY: data_value
+APPLIES_TO: cell
+
+
+KEYWORDS:
+special characters allowed dot decimal only
+
+
+DESCRIPTION:
+Data values must not contain special characters except for the decimal point (.).
+
+
+VALID:
+12.5
+0.0
+
+
+INVALID:
+12%
+10#
+5@3
+
+
+REASON:
+Special characters make the data invalid for numerical processing.
+
+
+
+
+RULE_ID: SR_001
+CATEGORY: sensor_range
+APPLIES_TO: column
+
+
+KEYWORDS:
+wind speed WS range 0 100 valid limits
+
+
+DESCRIPTION:
+Wind speed (WS) values must be between 0 and 100.
+
+
+VALID:
+0
+25.5
+100
+
+
+INVALID:
+-5
+150
+
+
+REASON:
+Wind speed values outside the valid range are not physically meaningful.
+RULE_ID: SR_002
+CATEGORY: sensor_range
+APPLIES_TO: column
+
+
+KEYWORDS:
+wind direction WD range 0 360 degrees valid
+
+
+DESCRIPTION:
+Wind direction (WD) values must be between 0 and 360 degrees.
+
+
+VALID:
+0
+180
+360
+
+
+INVALID:
+-10
+400
+
+
+REASON:
+Wind direction must be within 0 to 360 degrees.
+
+
+RULE_ID: SR_003
+CATEGORY: sensor_range
+APPLIES_TO: column
+
+
+KEYWORDS:
+temperature T range -50 70 Celsius valid
+
+
+DESCRIPTION:
+Temperature (T) values must be between -50 and 70 degrees Celsius.
+
+
+VALID:
+-10
+25
+60
+
+
+INVALID:
+-80
+100
+
+
+REASON:
+Temperature values outside the valid range are not realistic.
+
+
+RULE_ID: SR_004
+CATEGORY: sensor_range
+APPLIES_TO: column
+
+
+KEYWORDS:
+vertical wind speed VWS range -50 50 valid
+
+
+DESCRIPTION:
+Vertical wind speed (VWS) values must be between -50 and 50.
+
+
+VALID:
+-10
+0
+20
+
+
+INVALID:
+-100
+80
+
+
+REASON:
+Vertical wind speed values outside the valid range are not valid.
+
+
+RULE_ID: SR_005
+CATEGORY: sensor_range
+APPLIES_TO: column
+
+
+KEYWORDS:
+humidity RH range 0 120 percent valid
+
+
+DESCRIPTION:
+Humidity (RH) values must be between 0 and 120 percent.
+
+
+VALID:
+0
+50
+100
+
+
+INVALID:
+-5
+150
+
+
+REASON:
+Humidity values outside the valid range are not valid.
+
+
+RULE_ID: SR_006
+CATEGORY: sensor_range
+APPLIES_TO: column
+
+
+KEYWORDS:
+pressure P range 600 1800 mbar valid
+
+
+DESCRIPTION:
+Pressure (P) values must be between 600 and 1800 mbar.
+
+
+VALID:
+800
+1000
+1500
+
+
+INVALID:
+300
+2000
+
+
+REASON:
+Pressure values outside the valid range are invalid.
+
+
+
+
+RULE_ID: RL_002
+CATEGORY: row_level
+APPLIES_TO: row
+
+
+KEYWORDS:
+row partial missing values NA blank 9999 flag warning
+
+
+DESCRIPTION:
+A row should be flagged if it contains some missing values but also has valid data.
+
+
+VALID:
+Row contains only valid values.
+
+
+INVALID:
+(Not applicable — this rule flags, not invalidates)
+
+
+REASON:
+Partially missing rows may indicate incomplete sensor readings and should be reviewed.

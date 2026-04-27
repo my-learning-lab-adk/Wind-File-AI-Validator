@@ -1,5 +1,5 @@
 """
-backend.py  –  FastAPI backend for the Wind Data File Validator
+app.py  –  FastAPI backend for the Wind Data File Validator
 
 Endpoints:
   POST /api/analyse   – Upload a .txt file → scan + LLM column check → returns analysis
@@ -7,7 +7,7 @@ Endpoints:
   GET  /api/health    – Health check
 
 Run:
-  uvicorn backend:app --reload --port 8000
+  uvicorn app:app --reload --port 8000
 
 Requirements (same as sample_5.py):
   pip install fastapi uvicorn[standard] pandas langchain langchain-community
@@ -17,8 +17,10 @@ Requirements (same as sample_5.py):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
+import time
 import uuid
 
 from dotenv import load_dotenv
@@ -37,11 +39,17 @@ from pydantic import BaseModel
 from file_scanner import _detect_header_row, build_report_text, scan_file
 from tool_registry import build_system_prompt
 
+logger = logging.getLogger(__name__)
+
 # ── Config ─────────────────────────────────────────────────────────────────────
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-MODEL_NAME      = os.getenv("MODEL_NAME", "gemma3:12b")
-INDEX_DIR       = os.getenv("INDEX_DIR", "embeddings/rules_index_1")
-EMBED_MODEL     = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+OLLAMA_BASE_URL    = os.getenv("OLLAMA_BASE_URL")
+MODEL_NAME         = os.getenv("MODEL_NAME")
+INDEX_DIR          = os.getenv("INDEX_DIR")
+EMBED_MODEL        = os.getenv("EMBED_MODEL")
+MAX_UPLOAD_BYTES   = int(os.getenv("MAX_UPLOAD_BYTES", 0))
+ALLOWED_EXTENSIONS = {".txt", ".csv", ".tsv"}
+MAX_SESSIONS       = int(os.getenv("MAX_SESSIONS", 0))
+SESSION_TTL_SECS   = int(os.getenv("SESSION_TTL_SECS", 0))
 
 # ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Wind File Validator API")
@@ -72,16 +80,35 @@ def get_llm() -> ChatOllama:
 def get_vectordb():
     global _vectordb
     if _vectordb is None and os.path.isdir(INDEX_DIR):
-        emb = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
-        _vectordb = FAISS.load_local(
-            INDEX_DIR, emb, allow_dangerous_deserialization=True
-        )
+        try:
+            emb = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+            _vectordb = FAISS.load_local(
+                INDEX_DIR, emb, allow_dangerous_deserialization=True
+            )
+        except Exception as exc:
+            logger.error("Failed to load FAISS index from %s: %s", INDEX_DIR, exc)
+            _vectordb = None
     return _vectordb
 
 
 # ── In-memory session store ────────────────────────────────────────────────────
-# session_id -> {scan, df, bad_cols, col_reasons, file_name}
+# session_id -> {scan, df, bad_cols, col_reasons, file_name, created_at}
 sessions: dict[str, dict] = {}
+
+
+def _cleanup_sessions():
+    """Remove expired sessions and cap total count."""
+    now = time.time()
+    expired = [
+        sid for sid, s in sessions.items()
+        if now - s.get("created_at", 0) > SESSION_TTL_SECS
+    ]
+    for sid in expired:
+        del sessions[sid]
+    # If still over limit, drop oldest
+    while len(sessions) > MAX_SESSIONS:
+        oldest = min(sessions, key=lambda s: sessions[s].get("created_at", 0))
+        del sessions[oldest]
 
 
 # ── LLM helpers ───────────────────────────────────────────────────────────────
@@ -89,38 +116,64 @@ sessions: dict[str, dict] = {}
 def _call_llm(messages: list[dict]) -> str:
     lc = []
     for m in messages:
-        if m["role"] == "system":
-            lc.append(SystemMessage(content=m["content"]))
-        elif m["role"] == "user":
-            lc.append(HumanMessage(content=m["content"]))
-        elif m["role"] == "assistant":
-            lc.append(AIMessage(content=m["content"]))
-    return get_llm().invoke(lc).content
+        role = m.get("role", "")
+        content = m.get("content", "")
+        if role == "system":
+            lc.append(SystemMessage(content=content))
+        elif role == "user":
+            lc.append(HumanMessage(content=content))
+        elif role == "assistant":
+            lc.append(AIMessage(content=content))
+    if not lc:
+        raise ValueError("No valid messages to send to the LLM.")
+    try:
+        return get_llm().invoke(lc).content
+    except Exception as exc:
+        logger.error("LLM invocation failed: %s", exc)
+        raise RuntimeError(f"LLM is unavailable: {exc}") from exc
 
 
 def run_column_check(scan: dict) -> tuple[set[str], dict[str, str]]:
-    """Calls the LLM to validate column names against rules."""
+    """Calls the LLM in batches of 15 columns to identify which column names
+    violate rules and why."""
+    BATCH_SIZE = 15
+
     vectordb  = get_vectordb()
     col_list  = [c["original"] for c in scan["columns"]]
+    total_batches = max(1, (len(col_list) + BATCH_SIZE - 1) // BATCH_SIZE)
 
+    # Fetch rule context once — reused for every batch
     rule_context = "(rule index not available — generic naming check only)"
     if vectordb is not None:
         hits = vectordb.similarity_search(
-            "column naming conventions sensor names format units prefix suffix", k=6
+            "column validation rules sensor format unit naming", k=8
         )
         rule_context = "\n\n---\n\n".join(
-            f"[{h.metadata.get('source', '?')} p.{h.metadata.get('page', '?')}]\n{h.page_content}"
+            f"[{h.metadata.get('rule_id', '?')}]\n{h.page_content}"
             for h in hits
         )
 
-    prompt = f"""You are a wind-data validation expert.
+    bad_cols: set[str]       = set()
+    reasons:  dict[str, str] = {}
+
+    for batch_num, i in enumerate(range(0, len(col_list), BATCH_SIZE), start=1):
+        batch     = col_list[i : i + BATCH_SIZE]
+        batch_end = min(i + BATCH_SIZE, len(col_list))
+
+        logger.info(
+            "Column check batch %d/%d — columns %d–%d of %d (%d%%)",
+            batch_num, total_batches, i + 1, batch_end, len(col_list),
+            int((batch_num / total_batches) * 100),
+        )
+
+        prompt = f"""You are a wind-data validation expert.
 
 Below are the column names from a wind-data file.
 Evaluate EVERY column name against the naming rules provided and decide
 whether each one is VALID or INVALID.
 
 COLUMN NAMES (evaluate each one):
-{json.dumps(col_list, ensure_ascii=False)}
+{json.dumps(batch, ensure_ascii=False)}
 
 NAMING RULES (from validation documents):
 {rule_context}
@@ -142,31 +195,99 @@ Every column in the input must appear exactly once in the output.
 Use "valid": false when the column breaks any rule.
 Use "valid": true only when the column fully complies."""
 
-    resp = get_llm().invoke([
-        SystemMessage(content="Return only valid JSON. No markdown, no explanation."),
-        HumanMessage(content=prompt),
-    ]).content
+        try:
+            resp = get_llm().invoke([
+                SystemMessage(content="Return only valid JSON. No markdown, no explanation."),
+                HumanMessage(content=prompt),
+            ]).content
+        except Exception as exc:
+            logger.error("LLM call failed during column check batch %d: %s", batch_num, exc)
+            continue
 
-    bad_cols: set[str]       = set()
-    reasons:  dict[str, str] = {}
-    try:
-        cleaned = resp.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-        data    = json.loads(cleaned.strip())
-        col_set = set(col_list)
-        for entry in data.get("columns", []):
-            name   = str(entry.get("name",   ""))
-            valid  = entry.get("valid", True)
-            reason = str(entry.get("reason", ""))
-            if name in col_set:
-                reasons[name] = reason
-                if not valid:
-                    bad_cols.add(name)
-    except (json.JSONDecodeError, ValueError, AttributeError):
-        pass
+        try:
+            cleaned = resp.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
+            data      = json.loads(cleaned.strip())
+            batch_set = set(batch)
+            for entry in data.get("columns", []):
+                name   = str(entry.get("name",   ""))
+                valid  = entry.get("valid", True)
+                reason = str(entry.get("reason", ""))
+                if name in batch_set:
+                    reasons[name] = reason
+                    if not valid:
+                        bad_cols.add(name)
+        except (json.JSONDecodeError, ValueError, AttributeError) as exc:
+            logger.warning("Failed to parse LLM column-check response for batch %d: %s", batch_num, exc)
 
     return bad_cols, reasons
+
+
+def run_metadata_check(header_lines, vectordb):
+    if vectordb is None:
+        return [{
+            "line": "Metadata validation skipped",
+            "valid": False,
+            "reason": "Rules file not loaded"
+        }]
+
+    hits = vectordb.similarity_search(
+        "metadata validation rules latitude longitude elevation format coordinate", k=6
+    )
+
+    rule_context = "\n\n---\n\n".join(
+        f"[{h.metadata.get('rule_id', '?')}]\n{h.page_content}"
+        for h in hits
+    )
+
+    prompt = f"""You are a strict data validation expert.
+
+Validate the following metadata lines:
+
+{chr(10).join(header_lines)}
+
+VALIDATION RULES:
+{rule_context}
+
+INSTRUCTIONS:
+- Check each metadata line independently
+- Detect format issues, invalid characters, missing units, or invalid ranges
+- Be strict but explain clearly in simple human language
+- Do NOT mention rule IDs
+
+OUTPUT FORMAT (STRICT JSON):
+{{
+  "metadata": [
+    {{
+      "line": "<original line>",
+      "valid": true or false,
+      "reason": "<simple explanation>"
+    }}
+  ]
+}}
+"""
+
+    try:
+        llm = ChatOllama(
+            base_url=OLLAMA_BASE_URL,
+            model=MODEL_NAME,
+            temperature=0
+        )
+
+        resp = llm.invoke(prompt)
+        text = resp.content.strip()
+
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start == -1 or end == 0:
+            return []
+
+        data = json.loads(text[start:end])
+        return data.get("metadata", [])
+
+    except Exception as e:
+        return [{"line": "Metadata validation failed", "valid": False, "reason": str(e)}]
 
 
 # ── Agent tools (session-aware, no Streamlit dependency) ──────────────────────
@@ -182,12 +303,16 @@ def _make_tools(session: dict):
         rows, cols = scan["shape"]
         na_cols    = len(scan["na_cells"])
         s9_cols    = len(scan["sentinel_9999"])
+        sc_cols    = len(scan.get("special_char_cells", []))
         total_nan  = sum(i["count"] for i in scan["na_cells"])
         total_999  = sum(i["count"] for i in scan["sentinel_9999"])
+        total_sc   = sum(i["count"] for i in scan.get("special_char_cells", []))
+        dup_count  = scan.get("duplicate_row_count", 0)
         fully      = len(scan["all_missing_cols"])
         clean      = cols - len(
             {i["column"] for i in scan["na_cells"]} |
-            {i["column"] for i in scan["sentinel_9999"]}
+            {i["column"] for i in scan["sentinel_9999"]} |
+            {i["column"] for i in scan.get("special_char_cells", [])}
         )
         return (
             f"Total rows             : {rows:,}\n"
@@ -195,8 +320,10 @@ def _make_tools(session: dict):
             f"Timestamp column       : {scan['timestamp_column']}\n"
             f"Columns with NaN/blank : {na_cols}  (total NaN cells: {total_nan:,})\n"
             f"Columns with 9999      : {s9_cols}  (total 9999 cells: {total_999:,})\n"
+            f"Columns with special ch: {sc_cols}  (total special char cells: {total_sc:,})\n"
+            f"Duplicate rows         : {dup_count}\n"
             f"Fully-missing columns  : {fully}\n"
-            f"Clean columns          : {clean}  (no NaN, no 9999)"
+            f"Clean columns          : {clean}  (no NaN, no 9999, no special chars)"
         )
 
     def get_file_metadata(_: str) -> str:
@@ -241,14 +368,36 @@ def _make_tools(session: dict):
             lines.append(f"  {item['column']} : {item['count']:,}")
         return "\n".join(lines)
 
+    def get_special_char_details(_: str) -> str:
+        items = scan.get("special_char_cells", [])
+        if not items:
+            return "No special character values found in the file."
+        lines = [f"Columns with special characters ({len(items)} columns):"]
+        for item in items:
+            lines.append(f"  {item['column']} : {item['count']:,}")
+        return "\n".join(lines)
+
+    def get_duplicate_row_details(_: str) -> str:
+        dup_rows = scan.get("duplicate_rows", [])
+        dup_count = scan.get("duplicate_row_count", 0)
+        if not dup_rows:
+            return "No duplicate rows found (based on timestamp column)."
+        shown = dup_rows[:20]
+        extra = f" … (+{dup_count - 20} more)" if dup_count > 20 else ""
+        return (
+            f"Duplicate rows (based on timestamp): {dup_count}\n"
+            f"Row indices: {shown}{extra}"
+        )
+
     def get_column_status(_: str) -> str:
         na_map = {i["column"]: i["count"] for i in scan["na_cells"]}
         s9_map = {i["column"]: i["count"] for i in scan["sentinel_9999"]}
-        lines  = ["Column name                              NaN count   9999 count"]
-        lines.append("-" * 65)
+        sc_map = {i["column"]: i["count"] for i in scan.get("special_char_cells", [])}
+        lines  = ["Column name                              NaN count   9999 count   Special chars"]
+        lines.append("-" * 80)
         for c in scan["columns"]:
             col = c["original"]
-            lines.append(f"  {col:<40}{na_map.get(col, 0):<12}{s9_map.get(col, 0)}")
+            lines.append(f"  {col:<40}{na_map.get(col, 0):<12}{s9_map.get(col, 0):<14}{sc_map.get(col, 0)}")
         return "\n".join(lines)
 
     def retrieve_validation_rules(query: str) -> str:
@@ -257,7 +406,7 @@ def _make_tools(session: dict):
             return "Rule index not loaded — place the unzipped rules_index/ folder next to this app."
         hits   = vectordb.similarity_search(query, k=4)
         chunks = [
-            f"[{h.metadata.get('source', '?')} p.{h.metadata.get('page', '?')}]\n{h.page_content}"
+            f"[{h.metadata.get('rule_id', '?')}]\n{h.page_content}"
             for h in hits
         ]
         return "\n\n---\n\n".join(chunks)
@@ -283,6 +432,8 @@ def _make_tools(session: dict):
         "get_fully_missing_columns": get_fully_missing_columns,
         "get_nan_details":           get_nan_details,
         "get_9999_details":          get_9999_details,
+        "get_special_char_details":  get_special_char_details,
+        "get_duplicate_row_details": get_duplicate_row_details,
         "get_column_status":         get_column_status,
         "retrieve_validation_rules": retrieve_validation_rules,
         "check_column_names":        check_column_names,
@@ -298,6 +449,8 @@ REACT_SYSTEM = build_system_prompt([
     "get_fully_missing_columns",
     "get_nan_details",
     "get_9999_details",
+    "get_special_char_details",
+    "get_duplicate_row_details",
     "get_column_status",
     "retrieve_validation_rules",
     "check_column_names",
@@ -326,7 +479,11 @@ def run_agent(user_input: str, session: dict) -> str:
                 action_input = line[len("Action Input:"):].strip()
 
         if action and action in tool_map:
-            observation = tool_map[action](action_input or "")
+            try:
+                observation = tool_map[action](action_input or "")
+            except Exception as exc:
+                logger.error("Tool '%s' raised an error: %s", action, exc)
+                observation = f"Error running tool {action}: {exc}"
             messages.append({"role": "user", "content": f"Observation: {observation}"})
         else:
             messages.append({
@@ -357,10 +514,33 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/analyse")
 async def analyse_file(file: UploadFile = File(...)):
-    suffix = os.path.splitext(file.filename or "upload")[1] or ".txt"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
+    # ── Validate upload ───────────────────────────────────────────────────
+    filename = file.filename or "upload.txt"
+    suffix = os.path.splitext(filename)[1].lower() or ".txt"
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{suffix}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+
+    contents = await file.read()
+    if len(contents) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({len(contents) / 1024 / 1024:.1f} MB). "
+                   f"Max allowed: {MAX_UPLOAD_BYTES / 1024 / 1024:.0f} MB.",
+        )
+
+    # ── Write to temp file ────────────────────────────────────────────────
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(contents)
+            tmp_path = tmp.name
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save upload: {exc}") from exc
 
     try:
         scan      = scan_file(tmp_path)
@@ -376,39 +556,64 @@ async def analyse_file(file: UploadFile = File(...)):
             on_bad_lines="skip",
         ).dropna(axis=1, how="all")
 
+        logger.info("Starting column name validation for %s (%d columns)…", filename, scan["shape"][1])
         bad_cols, col_reasons = run_column_check(scan)
+        logger.info("Column name validation complete — %d flagged", len(bad_cols))
 
+        # ── Step 3: Metadata validation ──────────────────────────────────
+        metadata_results = []
+        header_lines = scan["metadata"].get("raw_header_lines", [])
+        if header_lines:
+            logger.info("Starting metadata validation…")
+            vectordb = get_vectordb()
+            metadata_results = run_metadata_check(header_lines, vectordb)
+            logger.info("Metadata validation complete — %d line(s) checked", len(metadata_results))
+
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Unexpected error during file analysis")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
     finally:
-        os.unlink(tmp_path)
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                logger.warning("Could not delete temp file: %s", tmp_path)
 
-    # Store session
+    # ── Cleanup old sessions, then store new one ──────────────────────────
+    _cleanup_sessions()
     session_id = str(uuid.uuid4())
     sessions[session_id] = {
-        "scan":        scan,
-        "df":          df,
-        "bad_cols":    list(bad_cols),
-        "col_reasons": col_reasons,
-        "file_name":   file.filename,
+        "scan":             scan,
+        "df":               df,
+        "bad_cols":         list(bad_cols),
+        "col_reasons":      col_reasons,
+        "metadata_results": metadata_results,
+        "file_name":        filename,
+        "created_at":       time.time(),
     }
 
     return {
-        "session_id":       session_id,
-        "file_name":        file.filename,
-        "analysis":         scan_text,
-        "flagged_columns":  list(bad_cols),
-        "col_reasons":      col_reasons,
-        "metadata":         scan["metadata"],
+        "session_id":        session_id,
+        "file_name":         filename,
+        "analysis":          scan_text,
+        "flagged_columns":   list(bad_cols),
+        "col_reasons":       col_reasons,
+        "metadata":          scan["metadata"],
+        "metadata_results":  metadata_results,
         "shape": {
             "rows":    scan["shape"][0],
             "columns": scan["shape"][1],
         },
         "summary": {
-            "nan_cols":          len(scan["na_cells"]),
-            "sentinel_cols":     len(scan["sentinel_9999"]),
-            "fully_missing_cols": len(scan["all_missing_cols"]),
+            "nan_cols":            len(scan["na_cells"]),
+            "sentinel_cols":       len(scan["sentinel_9999"]),
+            "special_char_cols":   len(scan.get("special_char_cells", [])),
+            "duplicate_rows":      scan.get("duplicate_row_count", 0),
+            "fully_missing_cols":  len(scan["all_missing_cols"]),
         },
+        "validation_messages":    scan.get("validation_messages", {}),
     }
 
 
@@ -424,19 +629,23 @@ async def chat(req: ChatRequest):
     # Build history prefix if provided
     history_prefix = ""
     if req.history:
-        lines = [
-            f"USER: {m['content']}"
-            for m in req.history
-            if m.get("role") == "user"
-        ]
+        lines = []
+        for m in req.history:
+            if isinstance(m, dict) and m.get("role") == "user" and "content" in m:
+                lines.append(f"USER: {m['content']}")
         if lines:
             history_prefix = "CONVERSATION HISTORY:\n" + "\n".join(lines) + "\n\n"
 
-    full_input = history_prefix + f"USER: {req.message}"
+    user_msg = req.message.strip()
+    if not user_msg:
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    full_input = history_prefix + f"USER: {user_msg}"
 
     try:
         answer = run_agent(full_input, session)
     except Exception as exc:
+        logger.exception("Agent error for session %s", req.session_id)
         raise HTTPException(status_code=500, detail=f"Agent error: {exc}") from exc
 
     return {"answer": answer}
