@@ -36,6 +36,15 @@ jobs:
           vault kv get -address="${{ secrets.VAULT_ADDR }}" -field=credentials kv/projects/ai-wind-file-validator > /tmp/.env
           chmod 600 /tmp/.env
 
+      - name: Copy .env to server
+        run: |
+          echo "${{ secrets.SERVER_SSH_KEY }}" > /tmp/ssh_key
+          chmod 600 /tmp/ssh_key
+          scp -i /tmp/ssh_key \
+            -o StrictHostKeyChecking=no \
+            -P ${{ secrets.SERVER_PORT }} \
+            /tmp/.env ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/.env
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -54,3 +63,4 @@ jobs:
               --restart unless-stopped \
               --env-file /tmp/.env \
               sirpi/ai-wind-file-validator-backend:latest
+            rm -f /tmp/.env
