@@ -1,10 +1,8 @@
 name: Build and Deploy
-
 on:
   push:
     branches:
       - dev
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -25,6 +23,19 @@ jobs:
           push: true
           tags: sirpi/ai-wind-file-validator-backend:latest
 
+      - name: Install Vault
+        run: |
+          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+            https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt update && sudo apt install -y vault
+
+      - name: Retrieve .env from Vault
+        run: |
+          vault login -address="${{ secrets.VAULT_ADDR }}" ${{ secrets.VAULT_TOKEN }}
+          vault kv get -address="${{ secrets.VAULT_ADDR }}" -field=credentials kv/projects/ai-wind-file-validator-backend > /tmp/.env
+          chmod 600 /tmp/.env
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -41,4 +52,5 @@ jobs:
               --name ai-wind-file-validator-backend \
               -p 4749:8000 \
               --restart unless-stopped \
+              --env-file /tmp/.env \
               sirpi/ai-wind-file-validator-backend:latest
