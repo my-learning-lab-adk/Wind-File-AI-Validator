@@ -178,14 +178,22 @@ COLUMN NAMES (evaluate each one):
 NAMING RULES (from validation documents):
 {rule_context}
 
-For each column name judge it strictly against the rules above.
-Return ONLY a JSON object — no markdown, no extra text:
+INSTRUCTIONS:
+
+1. Check EACH column independently.
+2. A column is INVALID if it violates ANY rule.
+3. You MUST strictly follow the rules — do NOT assume or guess.
+4. Use rule definitions, not just examples.
+5. If multiple issues exist, explain the most obvious issue based on the column name.
+Focus on what is clearly wrong, not internal rule names.
+6. Be strict — even small deviations should be marked INVALID.
+
 {{
   "columns": [
     {{
       "name": "<exact column name as given>",
       "valid": true or false,
-      "reason": "<one clear sentence explaining why it is valid or what rule it violates>"
+      "reason": "Explain in simple, human-readable language what is wrong with the column name. Mention the exact issue (e.g., invalid character, wrong format, invalid unit), but do NOT mention rule IDs."
     }},
     ...
   ]
@@ -245,7 +253,7 @@ def run_metadata_check(header_lines, vectordb):
 
 Validate the following metadata lines:
 
-{chr(10).join(header_lines)}
+{chr(10).join(line.rstrip() for line in header_lines)}
 
 VALIDATION RULES:
 {rule_context}
@@ -546,12 +554,12 @@ async def analyse_file(file: UploadFile = File(...)):
         scan      = scan_file(tmp_path)
         scan_text = build_report_text(scan)
 
-        header_row = _detect_header_row(tmp_path, encoding="ISO-8859-1")
+        header_row = _detect_header_row(tmp_path, encoding="utf-8-sig")
         df = pd.read_csv(
             tmp_path,
             sep="\t",
             skiprows=header_row,
-            encoding="ISO-8859-1",
+            encoding="utf-8-sig",
             engine="python",
             on_bad_lines="skip",
         ).dropna(axis=1, how="all")

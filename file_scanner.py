@@ -39,7 +39,7 @@ def normalize_column(name: str) -> str:
     return s.strip("_")
 
 
-def _detect_header_row(path: str, encoding: str = "ISO-8859-1", max_scan: int = 60) -> int:
+def _detect_header_row(path: str, encoding: str = "utf-8-sig", max_scan: int = 60) -> int:
     """Find the line index (0-based) that starts with Date/Time or Timestamp."""
     if not os.path.isfile(path):
         raise FileNotFoundError(f"File not found: {path}")
@@ -56,7 +56,7 @@ def _detect_header_row(path: str, encoding: str = "ISO-8859-1", max_scan: int = 
     raise ValueError("Could not find a Date/Time or Timestamp header row in the first 60 lines.")
 
 
-def _read_metadata(path: str, header_row: int, encoding: str = "ISO-8859-1") -> dict:
+def _read_metadata(path: str, header_row: int, encoding: str = "utf-8-sig") -> dict:
     """Pull latitude / longitude / elevation from the lines above the header."""
     meta = {"latitude": None, "longitude": None, "elevation": None, "raw_header_lines": []}
     with open(path, "r", encoding=encoding, errors="replace") as f:
@@ -83,7 +83,7 @@ def _read_metadata(path: str, header_row: int, encoding: str = "ISO-8859-1") -> 
 
 # ---------- main scan ----------
 
-def scan_file(path: str, encoding: str = "ISO-8859-1") -> dict:
+def scan_file(path: str, encoding: str = "utf-8-sig") -> dict:
     """
     Run a full sweep of the TSV file.
 
