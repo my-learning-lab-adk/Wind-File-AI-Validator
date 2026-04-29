@@ -33,7 +33,7 @@ jobs:
       - name: Retrieve .env from Vault
         run: |
           vault login -address="${{ secrets.VAULT_ADDR }}" ${{ secrets.VAULT_TOKEN }}
-          vault kv get -address="${{ secrets.VAULT_ADDR }}" -field=credentials kv/projects/ai-wind-file-validator-backend > /tmp/.env
+          vault kv get -address="${{ secrets.VAULT_ADDR }}" -field=credentials kv/projects/ai-wind-file-validator > /tmp/.env
           chmod 600 /tmp/.env
 
       - name: Deploy to server
