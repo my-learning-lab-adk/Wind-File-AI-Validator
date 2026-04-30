@@ -10,3 +10,5 @@ sentence-transformers
 faiss-cpu
 python-multipart
 pydantic
+huggingface-hub
+langchain-huggingface
