@@ -12,3 +12,5 @@ python-multipart
 pydantic
 huggingface-hub
 langchain-huggingface
+numpy
+streamlit
