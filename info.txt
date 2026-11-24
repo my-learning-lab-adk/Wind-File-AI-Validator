@@ -1,0 +1,168 @@
+================================================================================
+                      AI WIND DATA FILE VALIDATOR
+                      Project & Codebase Summary
+================================================================================
+
+1. PROJECT OVERVIEW
+--------------------------------------------------------------------------------
+The AI Wind Data File Validator is an intelligent quality assurance and validation
+system for meteorological mast (met-mast) wind resource assessment data.
+
+Wind data files (typically tab-separated .txt or .tsv files) collect high-frequency
+measurements from sensors such as anemometers (Wind Speed - WS), wind vanes (Wind
+Direction - WD), temperature sensors (T), barometers, and hygrometers. 
+
+Before using this data in expensive wind resource assessment and wind farm yield
+modelling, files must strictly comply with industry standards, correct sensor
+naming conventions, valid coordinate metadata, and data hygiene rules.
+
+This application provides:
+  1. Automated deterministic data cleaning & anomaly detection (pure Python/Pandas).
+  2. RAG-driven AI validation of column names and metadata against defined rules.
+  3. A conversational ReAct AI agent allowing users to interactively query file health.
+
+
+2. SYSTEM ARCHITECTURE & VALIDATION FLOW
+--------------------------------------------------------------------------------
+The system uses a multi-tier pipeline:
+
+  [Input File (.txt/.tsv)]
+             │
+             ├──► [Tier 1: Deterministic Engine (file_scanner.py)]
+             │      • Zero-LLM, high-speed Pandas/regex sweep.
+             │      • Detects header row, parses metadata (Lat/Lon/Elev).
+             │      • Scans for missing/blank (NaN) cells.
+             │      • Scans for 9999 sentinel placeholder values.
+             │      • Scans for illegal special characters.
+             │      • Flags duplicate timestamp rows.
+             │      • Identifies completely missing columns.
+             │
+             ├──► [Tier 2: AI / RAG Validation (app.py)]
+             │      • Retrieves relevant naming and metadata rules via FAISS
+             │        similarity search using sentence-transformers (all-MiniLM-L6-v2).
+             │      • Batches columns (15 at a time) and prompts Ollama LLM (gemma3:12b)
+             │        to classify columns as VALID/INVALID with plain-English reasons.
+             │      • Validates metadata formatting and ranges.
+             │
+             └──► [Tier 3: Conversational ReAct Agent (tool_registry.py + app.py)]
+                    • LLM agent bound to 11 custom inspection tools.
+                    • Answers natural language questions regarding file shape,
+                      sensors, missing data, and validation rule requirements.
+
+
+3. DIRECTORY & CODE STRUCTURE
+--------------------------------------------------------------------------------
+• app.py
+    FastAPI backend REST API. Exposes:
+      - POST /api/analyse : Uploads and processes files, runs scans and AI checks.
+      - POST /api/chat    : Conversational ReAct agent endpoint.
+      - GET  /api/health  : Service health check.
+    Manages in-memory session cache and dynamic tool binding.
+
+• file_scanner.py
+    Core deterministic data scanner built with pure Pandas and Regex.
+    Functions:
+      - _detect_header_row() : Finds the start of the tabular data (e.g. Date/Time).
+      - _read_metadata()     : Extracts latitude, longitude, and elevation.
+      - normalize_column()   : Sanitizes raw sensor header names.
+      - scan_file()          : Full sweep for NaNs, 9999s, special chars, duplicates.
+      - build_report_text()  : Formats human- and LLM-readable diagnostic report.
+
+• tool_registry.py
+    Central registry defining instructions and constraints for all agent tools.
+    Contains:
+      - TOOL_INSTRUCTIONS  : Specific prompts telling the agent when to call each tool.
+      - _SYSTEM_TEMPLATE   : ReAct prompt template enforcing concise, strict answers.
+      - build_system_prompt: Dynamically builds the system prompt for active tools.
+
+• sample_streamli.py
+    Standalone Streamlit prototype UI used during early development.
+    Features:
+      - Drag-and-drop file uploader.
+      - Color-coded HTML preview table (green=valid, red=issue) with hover tooltips.
+      - Interactive chat window powered by the same ReAct agent.
+
+• Documents/
+    - rules_gemma_AI.txt             : Structured rule definitions (ID, category,
+                                       keywords, valid/invalid examples, reasons).
+    - Wind_Data_Validator_KT_Document.docx : Comprehensive Knowledge Transfer doc.
+
+• embeddings/
+    - rules_index/                   : Pre-computed FAISS vector index of rules.
+    - RCA_embeddings/                : Root Cause Analysis vector index.
+
+• models/all-MiniLM-L6-v2/
+    Local weights and tokenizer for SentenceTransformers (all-MiniLM-L6-v2),
+    tracked via Git LFS.
+
+• Dockerfile & .github/workflows/deploy.yaml
+    - Docker container based on python:3.11-slim with Git LFS.
+    - Automated CI/CD deploying to Docker Hub (sirpi/ai-wind-file-validator-backend)
+      and remote server deployment with HashiCorp Vault secrets.
+
+• requirements.txt
+    Python dependency specifications.
+
+
+4. AGENT TOOLS SPECIFICATION
+--------------------------------------------------------------------------------
+The conversational agent in app.py has access to 11 domain-specific tools:
+
+  1. get_file_summary
+     - Purpose: Answers COUNT and OVERVIEW questions.
+     - Returns: Total rows, total columns, timestamp column name, NaN column counts,
+       9999 column counts, special char counts, duplicate rows, and clean columns.
+
+  2. get_file_metadata
+     - Purpose: Answers questions regarding geographical location.
+     - Returns: Latitude, longitude, and elevation extracted from header lines.
+
+  3. get_column_list
+     - Purpose: Lists sensor/column names with optional keyword filtering (e.g. 'WS', 'WD').
+     - Returns: Formatted numbered list of matching column headers.
+
+  4. get_fully_missing_columns
+     - Purpose: Identifies columns with ZERO valid data (100% NaN or 9999).
+     - Returns: Names of completely unpopulated columns.
+
+  5. get_nan_details
+     - Purpose: Pinpoints which specific columns contain blank/NaN values.
+     - Returns: Per-column missing cell count.
+
+  6. get_9999_details
+     - Purpose: Pinpoints which specific columns contain 9999 sentinel values.
+     - Returns: Per-column 9999 placeholder count.
+
+  7. get_special_char_details
+     - Purpose: Detects unexpected special characters in numeric data columns.
+     - Returns: Per-column count of non-standard cell values.
+
+  8. get_duplicate_row_details
+     - Purpose: Checks timestamp continuity and flags duplicate timestamps.
+     - Returns: Count and row indices of repeated timestamp entries.
+
+  9. get_column_status
+     - Purpose: Generates a complete data quality matrix for all columns.
+     - Returns: Table with Column Name | NaN Count | 9999 Count | Special Chars.
+
+ 10. retrieve_validation_rules
+     - Purpose: Semantic search over the rule database via FAISS.
+     - Returns: Relevant excerpts of naming conventions, units, and format rules.
+
+ 11. check_column_names
+     - Purpose: Validates column headers against rules using AI.
+     - Returns: JSON list of flagged columns with human-readable explanations.
+
+
+5. TECH STACK & TOOLS USED
+--------------------------------------------------------------------------------
+• Backend Framework       : FastAPI, Uvicorn (ASGI web server)
+• Data Validation & Parsing: Pandas, NumPy, Python standard library (re, unicodedata)
+• AI Orchestration        : LangChain, LangChain-Core, LangChain-Community
+• Local LLM Engine        : Ollama (running model: gemma3:12b) via langchain-ollama
+• Vector Database         : FAISS (faiss-cpu)
+• Embedding Models        : Sentence-Transformers (all-MiniLM-L6-v2), langchain-huggingface
+• Prototype Frontend      : Streamlit
+• Serialization & Schema  : Pydantic, python-multipart
+• Containerization & CI/CD: Docker, Git LFS, GitHub Actions, HashiCorp Vault
+================================================================================
